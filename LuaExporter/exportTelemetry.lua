@@ -1,6 +1,36 @@
 local socket = require("socket")
 local ltn12 = require("ltn12") 
 
+function send_post(host, port, json_data)
+
+	-- Construct HTTP POST request
+	local request = table.concat({
+		"POST /dcs_telemetry/_doc?pretty HTTP/1.1",
+		"Host: " .. host,
+		"Content-Type: application/json",
+		"Content-Length: " .. #json_data,
+		"Connection: close", -- Important to signal the server to close the socket
+		"",
+		json_data
+	}, "\r\n")
+
+	-- Connect to the server
+	local tcp = assert(socket.tcp())
+	tcp:connect(host, port)
+	tcp:send(request)
+
+	-- Receive response
+	local response = {}
+	while true do
+		local line, err = tcp:receive('*l')
+		if not line then break end
+		table.insert(response, line)
+	end
+
+	tcp:close()
+
+end 
+
 do
 
 	log.write('ExportTelemetry.LUA',log.INFO,' Preparing export ')
@@ -36,9 +66,10 @@ do
 		--myData.LatLongAlt.Lat             
 		--myData.LatLongAlt.Long 
 		--myData.Heading 
-				
-		local indicateAirSpeed = LoGetIndicatedAirSpeed()
-		local altitudeSeaLevel = LoGetAltitudeAboveSeaLevel()   
+		
+		local heading = myData.Heading*57.2958
+		local indicateAirSpeed = LoGetIndicatedAirSpeed()*1.94384 -- m/s to Knots
+		local altitudeSeaLevel = LoGetAltitudeAboveSeaLevel()*3.28084 -- m to feet
 		
 
 		--logFile:write(string.format("%s,%s,%.6f,%.6f,%.2f,%.2f,%.2f\n",os.date("%Y-%m-%d %H:%M:%S"),pilotName,myData.LatLongAlt.Lat,myData.LatLongAlt.Long,myData.Heading,indicateAirSpeed,altitudeSeaLevel))
@@ -49,33 +80,9 @@ do
 
 		-- JSON payload
 		local timestamp = os.date("%Y-%m-%dT%H:%M:%S")
-		local json_data = '{"time":"'..timestamp..'","pilotName":"'..pilotName..'","indicateAirSpeed":"'..indicateAirSpeed..'","altitudeSeaLevel":"'..altitudeSeaLevel..'","heading":"'..myData.Heading..'","latitude":"'..myData.LatLongAlt.Lat..'","longitude":"'..myData.LatLongAlt.Long..'"}'
+		local json_data = '{"time":"'..timestamp..'","pilotName":"'..pilotName..'","indicateAirSpeed":"'..indicateAirSpeed..'","altitudeSeaLevel":"'..altitudeSeaLevel..'","heading":"'..heading..'","latitude":"'..myData.LatLongAlt.Lat..'","longitude":"'..myData.LatLongAlt.Long..'"}'
 
-		-- Construct HTTP POST request
-		local request = table.concat({
-			"POST /dcs_telemetry/_doc?pretty HTTP/1.1",
-			"Host: " .. host,
-			"Content-Type: application/json",
-			"Content-Length: " .. #json_data,
-			"Connection: close", -- Important to signal the server to close the socket
-			"",
-			json_data
-		}, "\r\n")
-
-		-- Connect to the server
-		local tcp = assert(socket.tcp())
-		tcp:connect(host, port)
-		tcp:send(request)
-
-		-- Receive response
-		local response = {}
-		while true do
-			local line, err = tcp:receive('*l')
-			if not line then break end
-			table.insert(response, line)
-		end
-
-		tcp:close()
+		send_post(host, port, json_data)
 
 		-- Print the raw HTTP response
 		logFile:write(table.concat(response, "\n"))
